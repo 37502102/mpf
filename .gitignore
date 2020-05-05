@@ -17,4 +17,4 @@ phpunit.phar
 # local phpunit config
 /phpunit.xml
 
-tests
+test
