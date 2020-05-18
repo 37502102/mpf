@@ -16,5 +16,3 @@ Thumbs.db
 phpunit.phar
 # local phpunit config
 /phpunit.xml
-
-test
