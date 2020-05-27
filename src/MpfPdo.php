@@ -23,14 +23,14 @@ trait MpfPdo
      *
      * @var string
      */
-    private $mpfTable = '';
+    protected $mpfTable = '';
 
     /**
      * 主键名
      *
      * @var string
      */
-    private $mpfPk = 'id';
+    protected $mpfPk = 'id';
 
     /**
      * 创建
@@ -41,7 +41,7 @@ trait MpfPdo
     public function pdoCreate(array &$row): int
     {
         $sql = "INSERT INTO `{$this->mpfTable}` (`" . implode('`,`', array_keys($row)) . "`) values(:" .
-             implode(',:', array_keys($row)) . ")";
+            implode(',:', array_keys($row)) . ")";
 
         $this->mpfPdoStat = self::$mpfPdo->prepare($sql);
         foreach ($row as $k => $v) {
@@ -73,7 +73,7 @@ trait MpfPdo
             $this->mpfPdoStat->bindValue(':' . $k, $v);
         }
         $this->mpfPdoStat->bindValue(':' . $this->mpfPk, $pkv);
-        var_dump($sql, $row, $pkv);
+
         return $this->mpfPdoStat->execute();
     }
 
@@ -102,7 +102,7 @@ trait MpfPdo
      *            SQL中使用'?'则不用key,SQL中使用:key则用key=>value,只能使用其中一种方式
      * @param string $type
      *            one-返回一条数据,all-返回全部数据
-     * @return &array
+     * @return &array 未查到则返回空数组
      */
     public function &pdoSelect(string $sql, array $binds = [], string $type = 'all'): array
     {

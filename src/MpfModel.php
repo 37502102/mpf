@@ -27,17 +27,17 @@ abstract class MpfModel
     private static $uploadUrl = 'upload';
 
     /**
-     * 缓存表的键名,前面应加上项目名,以避免不同项目之间的冲突
+     * 缓存表的键名
      *
      * @var string
-     * @todo 需要把app_name替换
+     * @todo 需要前面应加上项目名，以避免不同项目之间的冲突
      */
-    private static $cacheKey = 'mpf.mpfTableCache.';
+    private static $cacheKey = 'mpfTableCache.';
 
     private static $cacheObj;
 
     /**
-     * 查询条件类型对应的HTTP请求参数名(value可修改)
+     * 查询条件类型对应的HTTP请求参数名(只有display对应的value可修改)
      *
      * @var array --text:文本搜索,act=准确值,blur=模糊搜索<br>
      *      --number:数字条件,min=最小值,max=最大值<br>
@@ -47,8 +47,7 @@ abstract class MpfModel
      *      --selectone:单选条件<br>
      *      --display:显示字段
      */
-    public static $condTypes = ['text' => 'tx', 'number' => 'nb', 'stat' => 'st', 'date' => 'da', 'select' => 'sl',
-        'selectone' => 'so', 'display' => 'dp'];
+    public static $condTypes = ['text', 'number', 'stat', 'date', 'select', 'selectone', 'display'];
 
     /**
      * 设置项
@@ -68,8 +67,8 @@ abstract class MpfModel
      *      --fieldOrders array 当前排序<br>
      */
     protected $mpfSets = ['alias' => '', 'fields' => [], 'stats' => [],
-        'autoTime' => ['createTime' => '', 'updateTime' => '', 'timeType' => 'datetime'], 'joins' => [],
-        'conds' => [], 'orders' => [], 'initJoin' => '', 'initCond' => '', 'needCache' => false, 'fieldKeys' => [],
+        'autoTime' => ['createTime' => '', 'updateTime' => '', 'timeType' => 'datetime'], 'joins' => [], 'conds' => [],
+        'orders' => [], 'initJoin' => '', 'initCond' => '', 'needCache' => false, 'fieldKeys' => [],
         'fieldSelects' => []];
 
     /**
@@ -92,15 +91,15 @@ abstract class MpfModel
             unset($attributes['notTable']);
         }
 
-        foreach (self::$condTypes as $k => $v) {
-            $this->mpfSets['conds'][$k] = [];
+        foreach (self::$condTypes as $type) {
+            $this->mpfSets['conds'][$type] = [];
+        }
+
+        if (! $notTable) {
+            $this->setMpfPdo();
         }
 
         if ($isMpf) {
-            if (! $notTable && ! self::$mpfPdo) {
-                self::$mpfPdo = new \PDO($attributes['dsn'], $attributes['username'], $attributes['password']);
-                unset($attributes['dsn'], $attributes['username'], $attributes['password']);
-            }
             $this->mpfInit();
         }
 
@@ -114,6 +113,31 @@ abstract class MpfModel
      * MPF的初始化,添加表的各种设置
      */
     abstract protected function mpfInit();
+
+    /**
+     * 设置数据库链接
+     *
+     * @todo 需要实现，应从配置文件中加载参数
+     */
+    private function setMpfPdo()
+    {
+        self::$mpfPdo = new \PDO('mysql:host=127.0.0.1;port=3306;dbname=mpf', 'manage', '123456');
+    }
+
+    /**
+     * 获取缓存对象
+     *
+     * @todo 需实现
+     * @return \Redis
+     */
+    private static function getMpfCacheObj()
+    {
+        if (! self::$cacheObj) {
+            self::$cacheObj = new \Redis();
+            self::$cacheObj->connect('127.0.0.1', 6379, 5);
+        }
+        return self::$cacheObj;
+    }
 
     /**
      * 设置表
@@ -140,7 +164,8 @@ abstract class MpfModel
      *            时间格式datetime-'Y-m-d H:i:s',int:timestamp
      * @return self
      */
-    public function setMpfAutoTime(string $createTime = 'create_time', string $updateTime = 'update_time', string $timeType = 'datetime'): self
+    public function setMpfAutoTime(string $createTime = 'create_time', string $updateTime = 'update_time',
+        string $timeType = 'datetime'): self
     {
         $this->mpfSets['autoTime']['createTime'] = $createTime;
         $this->mpfSets['autoTime']['updateTime'] = $updateTime;
@@ -266,10 +291,29 @@ abstract class MpfModel
      */
     public function setMpfCond(MpfField $field): self
     {
-        if (($type = $field->getQueryType()) && isset(self::$condTypes[$type])) {
+        if (($type = $field->getQueryType()) && in_array($type, self::$condTypes)) {
             $this->mpfSets['conds'][$type][$field->getKey()] = $field;
         }
         return $this;
+    }
+
+    /**
+     * 获取查询的设置
+     *
+     * @param string $key
+     * @return MpfField
+     */
+    public function getMpfCond($key)
+    {
+        if ($field = $this->getMpfField($key)) {
+            return $field;
+        }
+        foreach ($this->mpfSets['conds'] as $type => $conds) {
+            if (isset($conds[$key])) {
+                return $conds[$key];
+            }
+        }
+        return null;
     }
 
     /**
@@ -335,7 +379,7 @@ abstract class MpfModel
      */
     public function getMpfNeedCache(): bool
     {
-        return $this->mpfSets['needCache'];
+        return $this->mpfSets['needCache'] && self::getMpfCache(true) !== $this->mpfCacheBefore();
     }
 
     /**
@@ -349,29 +393,22 @@ abstract class MpfModel
     }
 
     /**
-     * 获取缓存对象
-     *
-     * @todo 需实现
-     * @return \Redis
-     */
-    private static function getMpfCacheObj()
-    {
-        if (! self::$cacheObj) {
-            self::$cacheObj = new \Redis();
-            self::$cacheObj->connect('127.0.0.1', 6379, 5);
-        }
-        return self::$cacheObj;
-    }
-
-    /**
      * 获取缓存表数组
      *
+     * @param bool $onlyCache
+     *            是否只取缓存，false-缓存中没有时从数据库中取
      * @return &array
      */
-    public static function &getMpfCache(): array
+    public static function &getMpfCache(bool $onlyCache = false): array
     {
         $key = self::getMpfCacheKey();
-        $value = unserialize(self::getMpfCacheObj()->get($key));
+        if ($value = self::getMpfCacheObj()->get($key)) {
+            $value = unserialize($value);
+        } elseif (! $onlyCache) {
+            $value = (new static(['isMpf' => true]))->mpfCacheBefore();
+        } else {
+            $value = [];
+        }
 
         return $value;
     }
@@ -448,11 +485,11 @@ abstract class MpfModel
      */
     private function checkUpload(array &$record): void
     {
-        if (isset($_FILES['rcd'])) {
-            foreach ($_FILES['rcd']['name'] as $key => $name) {
+        if (isset($_FILES[MpfController::$queryNames['row']])) {
+            foreach ($_FILES[MpfController::$queryNames['row']]['name'] as $key => $name) {
                 $record[$key]['name'] = $name;
             }
-            foreach ($_FILES['rcd']['tmp_name'] as $key => $name) {
+            foreach ($_FILES[MpfController::$queryNames['row']]['tmp_name'] as $key => $name) {
                 $record[$key]['tmp_name'] = $name;
             }
         }
@@ -472,45 +509,52 @@ abstract class MpfModel
         self::requestTrim($record);
 
         $msg = $new = [];
-        foreach ($record as $key => $v) {
-            $fieldSet = $this->getMpfField($key);
-            if ($v === null) {
-                $record[$key] = '';
+        /**
+         *
+         * @var MpfField $fieldSet
+         */
+        foreach ($this->mpfSets['fields'] as $key => $fieldSet) {
+            if ($fieldSet->getEditHidden() || $fieldSet->getEditReadOnly() ||
+                ($fieldSet->getJoinKey() && ! $fieldSet->getJoinEdit())) {
+                if (isset($record[$key])) {
+                    unset($record[$key]);
+                }
+                continue;
+            } elseif ($fieldSet->getEditRequire()) {
+                if ((! isset($record[$key]) || self::valueIsEmpty($record[$key]))) {
+                    $msg[] = "【{$fieldSet->getText()}】不能为空";
+                    continue;
+                }
+            } elseif (! isset($record[$key])) {
+                continue;
             }
-            if (! $fieldSet || $fieldSet->getEditHidden() || $fieldSet->getEditReadOnly() ||
-                 ($fieldSet->getJoinKey() && ! $fieldSet->getJoinEdit())) {
-                unset($record[$key]);
-                continue;
-            } elseif ($fieldSet->getEditRequire() && self::valueIsEmpty($v)) {
-                $msg[] = "【{$fieldSet->getText()}】不能为空";
-                continue;
-            } elseif ($fieldSet->getOptionSeparator()) {
-                if (is_array($v)) {
-                    $record[$key] = implode($fieldSet->getOptionSeparator(), $v);
+            if ($fieldSet->getOptionSeparator()) {
+                if (is_array($record[$key])) {
+                    $record[$key] = implode($fieldSet->getOptionSeparator(), $record[$key]);
                 } else {
                     $msg[] = "【{$fieldSet->getText()}】的值不是数组";
                     continue;
                 }
             } elseif ($fieldSet->isEditUpload()) {
-                if (isset($v['name']) && isset($v['tmp_name'])) {
-                    $this->mpfSets['uploads'][$key] = $fieldSet->setEditUploadFile($v['name'], $v['tmp_name']);
+                if (isset($record[$key]['name']) && isset($record[$key]['tmp_name'])) {
+                    $this->mpfSets['uploads'][$fieldSet->getFieldAlias(true)] = $fieldSet->setEditUploadFile(
+                        $record[$key]['name'], $record[$key]['tmp_name']);
                     $record[$key] = '-';
                 } else {
                     $msg[] = "【{$fieldSet->getText()}】需要上传文件的name和tmp_name";
                     continue;
                 }
             } elseif ($isImport && ($option = $fieldSet->getOption())) { // 导入时将枚举文本转化为对应的值
-                $record[$key] = array_search($v, $option);
+                $record[$key] = array_search($record[$key], $option);
                 if ($record[$key] === false) {
-                    $msg[] = "【{$v}】未找到对应的值";
+                    $msg[] = "【{$record[$key]}】未找到对应的值";
                     continue;
                 }
             }
-            $field = $fieldSet->getFieldAlias(true);
-            $new[$field] = $v;
+            $new[$fieldSet->getFieldAlias(true)] = $record[$key];
         }
         if ($msg) {
-            throw new \Exception(implode('\n', $msg));
+            throw new \Exception(implode("\n", $msg));
         }
         return $new;
     }
@@ -534,17 +578,16 @@ abstract class MpfModel
             foreach ($fields as $key => $fieldSet) {
                 if ($fieldSet->getQueryRequire()) {
                     $type = $fieldSet->getQueryType();
-                    $reqKey = self::$condTypes[$fieldSet->getQueryType()];
                     switch ($type) {
                         case 'text':
-                            $value = $req[$reqKey][$key]['act'] ?? '';
+                            $value = $req[$key]['act'] ?? '';
                             break;
                         case 'date':
                         case 'number':
-                            $value = $req[$reqKey][$key]['min'] ?? '';
+                            $value = $req[$key]['min'] ?? '';
                             break;
                         default:
-                            $value = $req[$reqKey][$key];
+                            $value = $req[$key];
                     }
                     if (self::valueIsEmpty($value)) {
                         $msg[] = "【" . $fieldSet->getText() . "】";
@@ -592,7 +635,7 @@ abstract class MpfModel
                 $return = array_merge_recursive($return, $ary);
             }
             if ($fieldSet->getQueryDisplay()) {
-                $return[self::$condTypes['display']][$key] = 1;
+                $return[MpfController::$queryNames['display']][] = $key;
             }
         }
         return $return;
@@ -629,111 +672,107 @@ abstract class MpfModel
         }
 
         $stats = $this->mpfSets['stats'];
-        foreach ($req as $reqKey => $reqValue) {
-            $keyCond = array_flip(self::$condTypes);
-
-            if (! isset($keyCond[$reqKey]) || ! is_array($reqValue)) { // 不在指定的查询项中
+        foreach ($req as $key => $value) {
+            if ($key == MpfController::$queryNames['display']) {
+                foreach ($value as $key) {
+                    $fieldSet = $this->getMpfField($key);
+                    $selects[] = $fieldSet->getSql();
+                    if ($stats) { // 有统计项加入归类字段
+                        $groupBys[] = $fieldSet->getFieldAlias();
+                    }
+                    if ($join = $fieldSet->getJoinKey()) { // 有关联,添加关联SQL
+                        $joins[$join] = $this->mpfSets['joins'][$join];
+                    }
+                    $this->mpfSets['fieldSelects'][] = $key; // 显示的字段
+                    $this->mpfSets['fieldOrders'][$key] = $orderKey == $key ? $fOrderStr : $key . "-d"; // 未排序字段默认点击倒序
+                }
                 continue;
             }
-            $condType = $keyCond[$reqKey];
-            foreach ($reqValue as $key => $value) {
-                if ($condType != 'display' && ! isset($this->mpfSets['conds'][$condType][$key])) { // 不在查询设置中
-                    continue;
-                }
-                if (! ($fieldSet = $this->mpfSets['conds'][$condType][$key] ?? $this->getMpfField($key))) {
-                    continue; // 如果是display会在fields中,没有对应的字段设置则跳过
-                }
-                $field = $fieldSet->getFieldReal();
+            if (! ($fieldSet = $this->getMpfCond($key))) {
+                continue;
+            }
+            $condType = $fieldSet->getQueryType();
+            $field = $fieldSet->getFieldReal();
 
-                if ($join = $fieldSet->getJoinKey()) { // 有关联,添加关联SQL
-                    $joins[$join] = $this->mpfSets['joins'][$join];
-                }
-                switch ($condType) {
-                    case 'display':
-                        $selects[] = $fieldSet->getSql();
-                        if ($stats) { // 有统计项加入归类字段
-                            $groupBys[] = $fieldSet->getFieldAlias();
-                        }
-                        $this->mpfSets['fieldSelects'][] = $key; // 显示的字段
-                        $this->mpfSets['fieldOrders'][$key] = $orderKey == $key ? $fOrderStr : $key . "-d"; // 未排序字段默认点击倒序
+            if ($join = $fieldSet->getJoinKey()) { // 有关联,添加关联SQL
+                $joins[$join] = $this->mpfSets['joins'][$join];
+            }
+            switch ($condType) {
+                case 'text':
+                    if (! isset($value['act']) || $value['act'] === '' || $value['act'] === null) {
                         break;
-                    case 'text':
-                        if (! isset($value['act']) || $value['act'] === '' || $value['act'] === null) {
-                            break;
-                        }
-                        if (strpos($value['act'], ',') || strpos($value['act'], '，')) { // 支持有分隔符的多项搜索
-                            $search = strpos($value['act'], ',') ? explode(',', $value['act']) : explode('，',
-                                $value['act']);
-                            $search = array_map('trim', $search);
-                        } else {
-                            $search = $value['act'];
-                        }
-                        if (isset($value['blur']) && $fieldSet->canQueryBlur()) { // 模糊搜索
-                            if (is_array($search)) {
-                                foreach ($search as &$v) {
-                                    $bindings[] = $v;
-                                    $v = "{$field} LIKE CONCAT('%',?,'%')";
-                                }
-                                $wheres[] = "(" . implode(' OR ', $search) . ")";
-                            } else {
-                                $wheres[] = "{$field} LIKE CONCAT('%',?,'%')";
-                                $bindings[] = $search;
-                            }
-                        } else {
-                            if (is_array($search)) {
-                                $wheres[] = "{$field} IN (" . str_repeat('?, ', count($search) - 1) . "?)";
-                                $bindings = array_merge($bindings, $search);
-                            } else {
-                                $wheres[] = "{$field} = ?";
-                                $bindings[] = $search;
-                            }
-                        }
-                        break;
-                    case 'number':
-                    case 'date':
-                        if (isset($value['min']) && strlen($value['min'])) {
-                            $wheres[] = "$field >= ?";
-                            $bindings[] = $value['min'];
-                        }
-                        if (isset($value['max']) && strlen($value['max'])) {
-                            $wheres[] = "$field <= ?";
-                            $bindings[] = $value['max'];
-                        }
-                        break;
-                    case 'select':
-                        if (count($value) < 1) {
-                            break;
-                        }
-                        if ($sp = $fieldSet->getOptionSeparator()) { // 有分隔符
-                            foreach ($value as &$v) {
+                    }
+                    if (strpos($value['act'], ',') || strpos($value['act'], '，')) { // 支持有分隔符的多项搜索
+                        $search = strpos($value['act'], ',') ? explode(',', $value['act']) : explode('，', $value['act']);
+                        $search = array_map('trim', $search);
+                    } else {
+                        $search = $value['act'];
+                    }
+                    if (isset($value['blur']) && $fieldSet->canQueryBlur()) { // 模糊搜索
+                        if (is_array($search)) {
+                            foreach ($search as &$v) {
                                 $bindings[] = $v;
-                                if ($sp == ',') {
-                                    $v = "FIND_IN_SET(?, {$field})";
-                                } else {
-                                    $v = "{$field} LIKE CONCAT('%',?,'%')";
-                                }
+                                $v = "{$field} LIKE CONCAT('%',?,'%')";
                             }
-                            $wheres[] = "(" . implode(' OR ', $value) . ")";
+                            $wheres[] = "(" . implode(' OR ', $search) . ")";
                         } else {
-                            $wheres[] = "{$field} IN (" . str_repeat('?, ', count($value) - 1) . "?)";
-                            $bindings = array_merge($bindings, $value);
+                            $wheres[] = "{$field} LIKE CONCAT('%',?,'%')";
+                            $bindings[] = $search;
                         }
-                        break;
-                    case 'selectone':
-                        $wheres[] = "{$field} = ?";
-                        $bindings[] = $value;
-                        break;
-                    case 'stat':
-                        if (isset($value['min']) && is_numeric($value['min'])) {
-                            $havings[] = "{$field} >= {$value['min']}";
+                    } else {
+                        if (is_array($search)) {
+                            $wheres[] = "{$field} IN (" . str_repeat('?, ', count($search) - 1) . "?)";
+                            $bindings = array_merge($bindings, $search);
+                        } else {
+                            $wheres[] = "{$field} = ?";
+                            $bindings[] = $search;
                         }
-                        if (isset($value['max']) && is_numeric($value['max'])) {
-                            $havings[] = "{$field} <= {$value['max']}";
+                    }
+                    break;
+                case 'number':
+                case 'date':
+                    if (isset($value['min']) && strlen($value['min'])) {
+                        $wheres[] = "$field >= ?";
+                        $bindings[] = $value['min'];
+                    }
+                    if (isset($value['max']) && strlen($value['max'])) {
+                        $wheres[] = "$field <= ?";
+                        $bindings[] = $value['max'];
+                    }
+                    break;
+                case 'select':
+                    if (count($value) < 1) {
+                        break;
+                    }
+                    if ($sp = $fieldSet->getOptionSeparator()) { // 有分隔符
+                        foreach ($value as &$v) {
+                            $bindings[] = $v;
+                            if ($sp == ',') {
+                                $v = "FIND_IN_SET(?, {$field})";
+                            } else {
+                                $v = "{$field} LIKE CONCAT('%',?,'%')";
+                            }
                         }
-                        break;
-                    default:
-                        break;
-                }
+                        $wheres[] = "(" . implode(' OR ', $value) . ")";
+                    } else {
+                        $wheres[] = "{$field} IN (" . str_repeat('?, ', count($value) - 1) . "?)";
+                        $bindings = array_merge($bindings, $value);
+                    }
+                    break;
+                case 'selectone':
+                    $wheres[] = "{$field} = ?";
+                    $bindings[] = $value;
+                    break;
+                case 'stat':
+                    if (isset($value['min']) && is_numeric($value['min'])) {
+                        $havings[] = "{$field} >= {$value['min']}";
+                    }
+                    if (isset($value['max']) && is_numeric($value['max'])) {
+                        $havings[] = "{$field} <= {$value['max']}";
+                    }
+                    break;
+                default:
+                    break;
             }
         }
         if ($stats) { // 统计字段都显示
@@ -762,7 +801,7 @@ abstract class MpfModel
             foreach ($this->mpfSets['orders'] as $key => $order) {
                 if ($fieldSet = $this->getMpfField($key)) {
                     if ($join = $fieldSet->getJoinKey() && ! isset($joins[$join]) || // 字段在关联查询中，该关联未使用
-                         $stats && ! in_array($fieldSet->getSql(), $selects)) { // 统计查询，该字段未在归类项中
+                        $stats && ! in_array($fieldSet->getSql(), $selects)) { // 统计查询，该字段未在归类项中
                         continue;
                     }
                     $orders[] = $fieldSet->getFieldAlias() . " $order";
@@ -773,10 +812,11 @@ abstract class MpfModel
         }
 
         $sql = "SELECT " . implode(", ", $selects) . " FROM {$this->mpfTable}" .
-             ($this->mpfSets['alias'] ? " AS {$this->mpfSets['alias']}" : "") .
-             ($joins ? " " . implode(' ', $joins) : "") . ($wheres ? " WHERE " . implode(" AND ", $wheres) : "") . ($groupBys ? " GROUP BY " .
-             implode(", ", $groupBys) . ($havings ? " HAVING " . implode(" AND ", $havings) : "") : "") .
-             ($orders ? " ORDER BY " . implode(", ", $orders) : "");
+            ($this->mpfSets['alias'] ? " AS {$this->mpfSets['alias']}" : "") . ($joins ? " " . implode(' ', $joins) : "") .
+            ($wheres ? " WHERE " . implode(" AND ", $wheres) : "") .
+            ($groupBys ? " GROUP BY " . implode(", ", $groupBys) .
+            ($havings ? " HAVING " . implode(" AND ", $havings) : "") : "") .
+            ($orders ? " ORDER BY " . implode(", ", $orders) : "");
 
         if ($isExcel) { // excel返回生成器
             $return = $this->pdoSelectGen($sql, $bindings);
@@ -789,7 +829,7 @@ abstract class MpfModel
             $temps = ["COUNT(1) AS total"];
             foreach ($stats as $fieldSet) { // 有设置总计项,否则用SUM汇总
                 $temps[] = ($fieldSet->getStatAllSql() ?: "SUM({$fieldSet->getFieldAlias()})") .
-                     " AS {$fieldSet->getFieldAlias()}";
+                    " AS {$fieldSet->getFieldAlias()}";
             }
             $sql2 = "SELECT " . implode(',', $temps) . " FROM ($sql) AS a";
             $statResult = $this->pdoSelect($sql2, $bindings, 'one');
@@ -797,8 +837,8 @@ abstract class MpfModel
             unset($statResult['total']);
         } else {
             $sql2 = "SELECT COUNT(1) AS total" . " FROM {$this->mpfTable}" .
-                 ($this->mpfSets['alias'] ? " AS {$this->mpfSets['alias']}" : "") .
-                 ($joins ? " " . implode(' ', $joins) : "") . ($wheres ? " WHERE " . implode(" AND ", $wheres) : "");
+                ($this->mpfSets['alias'] ? " AS {$this->mpfSets['alias']}" : "") .
+                ($joins ? " " . implode(' ', $joins) : "") . ($wheres ? " WHERE " . implode(" AND ", $wheres) : "");
             $countResult = $this->pdoSelect($sql2, $bindings, 'one');
             $total = $countResult['total'];
         }
@@ -823,8 +863,8 @@ abstract class MpfModel
                 $this->parseMpfResult($result[$k], $k);
             }
             $return['results'] = $result;
-            $return['pages'] = ['count' => $total, 'total' => $pages, 'current' => $page, 'first' => 1,
-                'prev' => max($page - 1, 1), 'next' => min($page + 1, $pages), 'last' => $pages];
+            $return['pages'] = ['count' => $total, 'total' => $pages, 'current' => $page, 'size' => $pageSize,
+                'first' => 1, 'prev' => max($page - 1, 1), 'next' => min($page + 1, $pages), 'last' => $pages];
             if ($groupBys) {
                 $return['stats'] = $statResult;
             }
@@ -850,44 +890,47 @@ abstract class MpfModel
     public function &getPageQuery(): array
     {
         $return = [];
+        /**
+         *
+         * @var MpfField $fieldSet
+         */
         foreach ($this->mpfSets['conds'] as $type => $fields) {
             if (! $fields) {
                 continue;
             }
-            switch ($type) {
-                case 'text':
-                    $return[$type]['title'] = ['text' => '文字条件', 'notice' => '勾上复选框可以进行模糊搜索，搜索多个时可以用逗号分隔'];
-                    break;
-                case 'date':
-                    $return[$type]['title'] = ['text' => '日期条件', 'notice' => '指定日期范围，起始日期为大于等于起始日期，截止日期为小于等于截止日期'];
-                    break;
-                case 'select':
-                    $return[$type]['title'] = ['text' => '多选条件', 'notice' => '可以同时选择多项'];
-                    break;
-                case 'selectone':
-                    $return[$type]['title'] = ['text' => '单选条件', 'notice' => ''];
-                    break;
-                case 'number':
-                    $return[$type]['title'] = ['text' => '数字条件', 'notice' => '可指定数值的范围，最小值为大于等于最小值，最大值为小于等于最大值'];
-                    break;
-                case 'stat':
-                    $return[$type]['title'] = ['text' => '统计条件', 'notice' => '可指定统计值的范围，最小值为大于等于最小值，最大值为小于等于最大值'];
-                    break;
-                default:
-                    break;
-            }
             foreach ($fields as $fieldSet) {
-                $return[$type]['data'][] = $fieldSet->getQuery();
+                $return['data'][] = $query = $fieldSet->getQuery();
+
+                // Vue绑定用的数据
+                // if (isset($query['query']['sub'])) {
+                // $return['vue'][$fieldSet->getKey()][$query['query']['sub']] = $query['query']['value'];
+                // } else {
+                // $return['vue'][$fieldSet->getKey()] = $query['query']['value'];
+                // }
+                // if (isset($query['query2'])) {
+                // $return['vue'][$fieldSet->getKey()][$query['query2']['sub']] = $query['query2']['value'];
+                // }
             }
+            // $return['vue']['subv'] = 1;
+            // $return['vue']['page'] = 1;
+            // $return['vue']['ord'] = '';
         }
         // 显示或归类
-        $return['display']['title'] = ['text' => $this->mpfSets['stats'] ? '归类选项' : '显示选项',
-            'notice' => $this->mpfSets['stats'] ? '只对选定的项进行归类统计' : '在结果页中只显示选定的项'];
         foreach ($this->mpfSets['fields'] as $fieldSet) {
             if ($data = $fieldSet->getQueryDisplay()) {
-                $return['display']['data'][] = $data;
+                $return['display'][] = $data;
+                // if ($data['checked']) {
+                // $return['vue'][MpfController::$queryNames['display']][] = $data['value'];
+                // }
             }
         }
+        $return['hidden'] = [
+            'subv' => ['html' => 'input', 'type' => 'hidden', 'name' => MpfController::$queryNames['query'] . "[subv]",
+                'value' => 1],
+            'page' => ['html' => 'input', 'type' => 'hidden', 'name' => MpfController::$queryNames['query'] . "[page]",
+                'value' => 1],
+            'ord' => ['html' => 'input', 'type' => 'hidden', 'name' => MpfController::$queryNames['query'] . "[ord]",
+                'value' => '']];
 
         return $return;
     }
@@ -898,19 +941,26 @@ abstract class MpfModel
      * @throws \Exception
      * @return &array
      */
-    public function &getPageEdit(int $pkv = 0): array
+    public function &getPageEdit(int $pkv = 0, bool $isAdd = true): array
     {
-        $return = [];
+        $return = $row = [];
         if ($pkv) {
             $row = $this->pdoFind($pkv);
             if (! $row) {
                 throw new \Exception("未找到主键值为【{$pkv}】的记录");
             }
-        } else {
-            $row = [];
+            if (! $isAdd) {
+                $return[] = [
+                    'data' => ['html' => 'input', 'type' => 'hidden',
+                        'name' => MpfController::$queryNames['row'] . '[pk]', 'value' => $pkv]];
+            }
+        }
+        if ($isAdd) {
+            $return[] = [
+                'data' => ['html' => 'input', 'type' => 'hidden',
+                    'name' => MpfController::$queryNames['row'] . '[state]', 'value' => 0]];
         }
         $this->getPageEditBefore($row);
-
         /**
          *
          * @var MpfField $fieldSet
@@ -954,9 +1004,8 @@ abstract class MpfModel
             $new[$this->mpfPk] = $id;
 
             if (isset($this->mpfSets['uploads'])) {
-                foreach ($this->mpfSets['uploads'] as $fieldSet) {
-                    $update[$fieldSet->getFieldAlias(true)] = $fieldSet->getEditUploadFile($id,
-                        self::$uploadPath . '/' . $this->mpfTable);
+                foreach ($this->mpfSets['uploads'] as $field => $fieldSet) {
+                    $update[$field] = $fieldSet->getEditUploadFile($id, self::$uploadPath . '/' . $this->mpfTable);
                 }
                 $this->pdoUpdate($id, $update);
             }
@@ -1001,7 +1050,7 @@ abstract class MpfModel
     public function &mpfUpdate(int $pkv, array &$record)
     {
         $this->checkUpload($record);
-        $this->checkRecord($record);
+        $new = $this->checkRecord($record);
 
         $row = $this->pdoFind($pkv);
         if (! $row) {
@@ -1010,11 +1059,10 @@ abstract class MpfModel
 
         $update = ['new' => [], 'old' => []];
         $isUpload = false;
-        foreach ($record as $key => $v) {
-            $fieldSet = $this->getMpfField($key);
-            $field = $fieldSet->getFieldAlias(true);
-            if ($fieldSet->isEditUpload() && isset($this->mpfSets['uploads'][$key])) {
-                $v = $fieldSet->getEditUploadFile($pkv, self::$uploadPath . '/' . $this->mpfTable);
+        foreach ($new as $field => $v) {
+            if (isset($this->mpfSets['uploads'][$field])) {
+                $v = $this->mpfSets['uploads'][$field]->getEditUploadFile($pkv,
+                    self::$uploadPath . '/' . $this->mpfTable);
                 $isUpload = true;
             }
             if ($v != $row[$field]) {
@@ -1030,13 +1078,13 @@ abstract class MpfModel
             try {
                 self::$mpfPdo->beginTransaction();
 
-                $return = $this->_mpfUpdate($pkv, $update['new']);
+                $return = $this->pdoUpdate($pkv, $update['new']);
 
                 $this->mpfUpdateAfter($row, $update['new']);
 
                 self::$mpfPdo->commit();
 
-                return $return ? $update : $return;
+                return $update;
             } catch (\Exception $e) {
                 self::$mpfPdo->rollBack();
                 throw $e;
@@ -1078,7 +1126,7 @@ abstract class MpfModel
      * @param array $update
      *            应是程序定义的内容,而不是用户提交的内容<br>
      *            可以在值后加|raw表示保持原样,否则值会加上单引号
-     * @throws Exception
+     * @throws \Exception
      * @return &array
      */
     public function &mpfUpdates(array &$pkvs, array $update): array
@@ -1191,7 +1239,7 @@ abstract class MpfModel
      *
      * @param array $pkvs
      * @param array $records
-     * @throws Exception
+     * @throws \Exception
      * @return &array
      */
     public function &mpfSaves(array &$pkvs, array &$records): array
@@ -1205,11 +1253,11 @@ abstract class MpfModel
 
             $return = [];
             foreach ($pkvs as $i => $pkv) {
-                $record[$i] = $this->checkRecord($record[$i]);
-                $this->checkAutoTime($record[$i]);
+                $records[$i] = $this->checkRecord($records[$i]);
+                $this->checkAutoTime($records[$i]);
 
-                $this->pdoUpdate($pkv, $record[$i]);
-                $return[] = $record[$i] + ['pk' => $pkv];
+                $this->pdoUpdate($pkv, $records[$i]);
+                $return[] = $records[$i] + ['pk' => $pkv];
             }
 
             $this->mpfSavesAfter($pkvs, $records);
@@ -1252,12 +1300,12 @@ abstract class MpfModel
     {
         set_time_limit(0);
 
-        $fileName = mb_convert_encoding(str_replace([' ', '　'], '', $title), 'gbk', 'utf-8') . date('_YmdHi') .
-             ".csv";
+        $fileName = mb_convert_encoding(str_replace([' ', '　'], '', $title), 'gbk', 'utf-8') . date('_YmdHi') . ".csv";
         header("Content-Disposition: attachment;filename=\"$fileName\"");
         header("Content-Type: text/csv");
 
         $rows = $this->getPageResult($req, 100, true);
+
         $titles = $this->getMpfResultTitles(false);
 
         echo implode(',', $titles) . "\n";
@@ -1277,15 +1325,14 @@ abstract class MpfModel
     {
         set_time_limit(0);
 
-        $fileName = mb_convert_encoding(str_replace([' ', '　'], '', $title), 'gbk', 'utf-8') . date('_YmdHi') .
-             ".xlsx";
+        $fileName = mb_convert_encoding(str_replace([' ', '　'], '', $title), 'gbk', 'utf-8') . date('_YmdHi') . ".xlsx";
         header("Content-Disposition: attachment;filename=\"$fileName\"");
         header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
 
         $rows = $this->getPageResult($req, 100, true);
         $titles = $this->getMpfResultTitles(false);
 
-        $sheet = new PhpOffice\PhpSpreadsheet\Spreadsheet();
+        // $sheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
         $sheet->getProperties()
             ->setCreator('ChenLiang')
             ->setTitle('MPF ' . $title)
@@ -1312,7 +1359,7 @@ abstract class MpfModel
             }
             $i ++;
         }
-        $writer = PhpOffice\PhpSpreadsheet\IOFactory::createWriter($sheet, 'xlsx');
+        // $writer = \PhpOffice\PhpSpreadsheet\IOFactory::createWriter($sheet, 'xlsx');
         $writer->save('php://output');
     }
 
@@ -1320,7 +1367,7 @@ abstract class MpfModel
      * 导入CSV格式数据
      *
      * @param string $file
-     * @throws Exception
+     * @throws \Exception
      * @return &array ['suc'=>成功数,'err'=>失败数,'msg'=>[错误信息],'data'=>[成功的数据]]
      */
     public function &mpfImportCsv(string $file)
@@ -1362,7 +1409,7 @@ abstract class MpfModel
     {
         set_time_limit(0);
 
-        $sheet = PhpOffice\PhpSpreadsheet\IOFactory::load($file);
+        // $sheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($file);
         $ary = $sheet->getActiveSheet()->toArray();
 
         $title = $msg = $data = [];
@@ -1437,10 +1484,10 @@ abstract class MpfModel
      * @param int $suc
      * @param int $err
      * @param array $data
-     * @throws Exception
+     * @throws \Exception
      */
     private function parsImportData(array $data, array $title, array &$msg, $havePk, int $i, int &$suc, int &$err,
-        array &$data)
+        array &$return)
     {
         $row = [];
         foreach ($title as $k => $key) {
@@ -1462,7 +1509,7 @@ abstract class MpfModel
                         $this->mpfUpdateAfter($oldRow, $row);
                         self::$mpfPdo->commit();
                         $suc ++;
-                        $data[] = $row;
+                        $return[] = $row;
                     } catch (\Exception $e) {
                         self::$mpfPdo->rollBack();
                         throw $e;
@@ -1477,7 +1524,7 @@ abstract class MpfModel
                         $this->mpfCreateAfter($row);
                         self::$mpfPdo->commit();
                         $suc ++;
-                        $data[] = $row;
+                        $return[] = $row;
                     } catch (\Exception $e) {
                         self::$mpfPdo->rollBack();
                         throw $e;
@@ -1553,6 +1600,10 @@ abstract class MpfModel
                 $titles[$field]['text'] = $fieldSet->getText();
                 $titles[$field]['html'] = 'a';
                 $titles[$field]['link'] = '?ord=' . $this->mpfSets['fieldOrders'][$key];
+                $temp = explode('-', $this->mpfSets['fieldOrders'][$key]);
+                $titles[$field]['key'] = $temp[0];
+                $titles[$field]['ord'] = $temp[1];
+                $titles[$field]['width'] = $fieldSet->getResultWidth();
             } else { // excel
                 $titles[$field] = $fieldSet->getText();
             }

@@ -11,7 +11,7 @@ class MpfField
 
     private $set;
 
-    private static $tagColors = ['bg-red', 'bg-blue', 'bg-green', 'bg-orange', 'bg-black', 'bg-grey', 'bg-white'];
+    private static $tagColors = ['danger', 'primary', 'success', 'warning', 'info'];
 
     private function __construct(string $key, string $text, string $sql)
     {
@@ -56,6 +56,17 @@ class MpfField
         return $this->set['resultDisplay'] ?? true;
     }
 
+    public function setResultWidth(int $width): self
+    {
+        $this->set['resultWidth'] = $width;
+        return $this;
+    }
+
+    public function getResultWidth(): int
+    {
+        return $this->set['resultWidth'] ?? 200;
+    }
+
     /**
      * 设置结果页编辑框
      *
@@ -66,6 +77,7 @@ class MpfField
     public function setResultInput(int $size = 10): self
     {
         $this->set['result'] = ['type' => 'input', 'size' => $size];
+        $this->setResultWidth(max($size * 20, 75));
         return $this;
     }
 
@@ -109,7 +121,7 @@ class MpfField
         if (! isset($this->set['result'])) {
             return [];
         }
-        $name = "edit[$i][{$this->getKey()}]";
+        $name = MpfController::$queryNames['rows'] . "[$i][{$this->getKey()}]";
         switch ($this->set['result']['type']) {
             case 'input':
                 return ['name' => $name, 'value' => $value, 'html' => 'input', 'type' => 'text',
@@ -143,13 +155,16 @@ class MpfField
         if (! $this->isEditUpload()) {
             return [];
         }
-        $tmp = pathinfo($v);
-        $url = $uploadUrl . '/' . $v;
-        if (in_array(strtolower($tmp['extension']), ['png', 'jpeg', 'jpg', 'bmp', 'gif', 'tif', 'psd', 'ico'])) {
-            return ['text' => $v, 'html' => 'img', 'src' => $url];
-        } else {
+        if ($v) {
+            $tmp = pathinfo($v);
+            $url = $uploadUrl . '/' . $v;
+            if (isset($tmp['extension']) &&
+                in_array(strtolower($tmp['extension']), ['png', 'jpeg', 'jpg', 'bmp', 'gif', 'tif', 'psd', 'ico'])) {
+                return ['text' => $v, 'html' => 'img', 'src' => $url];
+            }
             return ['text' => $v, 'html' => 'a', 'href' => $url];
         }
+        return ['text' => $v];
     }
 
     /**
@@ -177,13 +192,13 @@ class MpfField
             foreach ($titles as $k => $v) {
                 $return[$k] = ['html' => 'span', 'title' => $v, 'text' => $values[$k]];
                 if (isset($colors[$k])) {
-                    $return[$k]['class'] = 'tag ' . $colors[$k];
+                    $return[$k]['color'] = $colors[$k];
                 }
             }
         } else { // 单选
             $return = ['html' => 'span', 'title' => $value, 'text' => $this->getOptionValue($value)];
             if ($this->getTagColor()) {
-                $return['class'] = 'tag ' . $this->getTagColor($value);
+                $return['color'] = $this->getTagColor($value);
             }
         }
         return $return;
@@ -216,7 +231,8 @@ class MpfField
         }
         if (is_int($this->set['resultMore'])) {
             if (mb_strlen($value, 'utf-8') > $this->set['resultMore']) {
-                return ['html' => 'span', 'title' => $value, 'text' => mb_substr($v, 0, $fieldSet['more'], 'utf-8')];
+                return ['html' => 'span', 'title' => $value,
+                    'text' => mb_substr($value, 0, $this->set['resultMore'], 'utf-8')];
             }
             return $value;
         }
@@ -429,6 +445,10 @@ class MpfField
     {
         $this->set['edit'] = 'input';
         $this->set['editType'] = $type;
+
+        if ($type == 'password') {
+            $this->setEditNoValue();
+        }
         return $this;
     }
 
@@ -454,7 +474,7 @@ class MpfField
      *            是否为html内容
      * @return self
      */
-    public function setEditTextarea(int $rows = 10, bool $isHtml = false): self
+    public function setEditTextarea(int $rows = 5, bool $isHtml = false): self
     {
         $this->set['edit'] = 'textarea';
         $this->set['editRows'] = $rows;
@@ -545,7 +565,8 @@ class MpfField
             return $return;
         }
 
-        $return['data'] = ['name' => $this->getEditName(), 'require' => $this->getEditRequire()];
+        $return['data'] = ['name' => $this->getEditName(), 'key' => $this->getKey(),
+            'require' => $this->getEditRequire()];
         if ($option = $this->getOption()) { // 枚举
             $return['data']['html'] = $this->set['edit'] ?? 'select';
             if ($str = $this->getOptionSeparator()) { // 多选
@@ -569,7 +590,7 @@ class MpfField
             $return['data']['type'] = $this->set['editType'] ?? 'text';
             if ($return['data']['type'] == 'file' && $value) { // 上传文件
                 $return['data']['text'] = "当前文件:$value";
-            } elseif ($return['data']['type'] == 'textarea') { // 文本框
+            } elseif ($return['data']['html'] == 'textarea') { // 文本框
                 $return['data']['rows'] = $this->set['editRows'];
             }
         }
@@ -596,7 +617,7 @@ class MpfField
      */
     public function getEditName(): string
     {
-        return "rcd[{$this->getKey()}]" . ($this->getOptionSeparator() ? '[]' : '');
+        return MpfController::$queryNames['row'] . "[{$this->getKey()}]" . ($this->getOptionSeparator() ? '[]' : '');
     }
 
     /**
@@ -604,7 +625,7 @@ class MpfField
      *
      * @return self
      */
-    public function setQueryDate(string $type): self
+    public function setQueryDate(): self
     {
         $this->set['queryType'] = 'date';
         return $this;
@@ -717,18 +738,18 @@ class MpfField
             if ($min = $this->getQueryDefaultMin()) {
                 switch ($type) {
                     case 'text':
-                        $return[MpfModel::$condTypes[$type]][$this->getKey()]['act'] = $min;
+                        $return[$this->getKey()]['act'] = $min;
                         break;
                     case 'date':
                     case 'number':
-                        $return[MpfModel::$condTypes[$type]][$this->getKey()]['min'] = $min;
+                        $return[$this->getKey()]['min'] = $min;
                         break;
                     default:
-                        $return[MpfModel::$condTypes[$type]][$this->getKey()] = $min;
+                        $return[$this->getKey()] = $min;
                 }
             }
             if ($max = $this->getQueryDefaultMax()) {
-                $return[MpfModel::$condTypes[$type]][$this->getKey()]['max'] = $max;
+                $return[$this->getKey()]['max'] = $max;
             }
         }
         return $return;
@@ -753,33 +774,27 @@ class MpfField
         $min = $this->getQueryDefaultMin();
         $max = $this->getQueryDefaultMax();
 
-        $return = ['type' => $type, 'title' => $this->getText()];
+        $return = ['title' => $this->getText(), 'type' => $type, 'key' => $this->getKey()];
         switch ($type) {
             case 'text':
-                $return['query'] = ['html' => 'input', 'type' => 'text',
-                    'name' => self::getQueryName($this) . "[act]", 'value' => $min];
+                $return['query'] = ['name' => self::getQueryName($this) . "[act]", 'value' => $min];
 
                 if ($this->canQueryBlur()) { // 允许模糊搜索
-                    $return['query2'] = ['html' => 'checkbox', 'name' => self::getQueryName($this) . "[blur]",
-                        'value' => 1, 'title' => '模糊搜索'];
+                    $return['query2'] = ['name' => self::getQueryName($this) . "[blur]", 'value' => false];
                 }
                 break;
             case 'date':
-                $return['query'] = ['html' => 'input', 'type' => 'date',
-                    'name' => self::getQueryName($this) . "[min]", 'value' => $min, 'placeholder' => '起始日期'];
-                $return['query2'] = ['html' => 'input', 'type' => 'date',
-                    'name' => self::getQueryName($this) . "[max]", 'value' => $max, 'placeholder' => '截止日期'];
+                $return['query'] = ['name' => self::getQueryName($this) . "[min]", 'value' => $min];
+                $return['query2'] = ['name' => self::getQueryName($this) . "[max]", 'value' => $max];
                 break;
             case 'number':
             case 'stat':
-                $return['query'] = ['html' => 'input', 'type' => 'number',
-                    'name' => self::getQueryName($this) . "[min]", 'value' => $min, 'placeholder' => '最小值'];
-                $return['query2'] = ['html' => 'input', 'type' => 'number',
-                    'name' => self::getQueryName($this) . "[max]", 'value' => $max, 'placeholder' => '最大值'];
+                $return['query'] = ['name' => self::getQueryName($this) . "[min]", 'value' => $min];
+                $return['query2'] = ['name' => self::getQueryName($this) . "[max]", 'value' => $max];
                 break;
             case 'selectone':
             case 'select':
-                $return['query'] = ['html' => 'select', 'option' => $this->getOption(), 'selected' => $min,
+                $return['query'] = ['option' => $this->getOption(), 'value' => $min,
                     'name' => self::getQueryName($this), 'multiple' => $type == 'select' ? true : false];
 
                 if (isset($this->set['queryJoin'])) { // 设置了联动
@@ -806,8 +821,9 @@ class MpfField
         if ($this->isStat()) { // 统计项不能选择
             return [];
         }
-        return ['html' => 'checkbox', 'name' => MpfModel::$condTypes['display'] . "[{$this->getKey()}]",
-            'value' => 1, 'checked' => $this->getResultDisplay(), 'text' => $this->getText()];
+        return ['html' => 'checkbox',
+            'name' => MpfController::$queryNames['query'] . '[' . MpfController::$queryNames['display'] . '][]',
+            'value' => $this->getKey(), 'checked' => $this->getResultDisplay(), 'text' => $this->getText()];
     }
 
     /**
@@ -832,15 +848,15 @@ class MpfField
     }
 
     /**
-     * 获取查询name
+     * 获取查询name，查询参数都放入q数组中，所以不要占用
      *
      * @param MpfField $field
      * @return string
      */
     public static function getQueryName(MpfField $field): string
     {
-        return MpfModel::$condTypes[$field->getQueryType()] . "[{$field->getKey()}]" .
-             ($field->getQueryType() == 'select' ? "[]" : '');
+        return MpfController::$queryNames['query'] . "[{$field->getKey()}]" .
+            ($field->getQueryType() == 'select' ? "[]" : '');
     }
 
     /**
@@ -864,8 +880,7 @@ class MpfField
      */
     public function setQueryJoin(MpfField $joinField, string $url): self
     {
-        $this->set['queryJoin'] = ['url' => $url,
-            'multiple' => $joinField->getQueryType() == 'select' ? true : false,
+        $this->set['queryJoin'] = ['url' => $url, 'multiple' => $joinField->getQueryType() == 'select' ? true : false,
             'level1Name' => self::getQueryName($joinField), 'level2Name' => self::getQueryName($this)];
         return $this;
     }
@@ -918,11 +933,11 @@ class MpfField
     /**
      * 设置结果页回调函数
      *
-     * @param \Closure $callback
+     * @param callable $callback
      *            传递的参数为(该字段的值,该条记录结果集,该记录在结果集中的位置)
      * @return self
      */
-    public function setCallbackResult(\Closure $callback): self
+    public function setCallbackResult(callable $callback): self
     {
         $this->set['callback']['result'] = $callback;
         return $this;
@@ -939,17 +954,17 @@ class MpfField
      */
     public function getCallbackResult($value, array &$row)
     {
-        return isset($this->set['callback']['result']) ? $this->set['callback']['result']($value, $row) : false;
+        return isset($this->set['callback']['result']) ? call_user_func($this->set['callback']['result'], $value, $row) : false;
     }
 
     /**
      * 设置编辑页回调函数
      *
-     * @param \Closure $callback
+     * @param callable $callback
      *            传递的参数为(该字段的值,该条记录数组)
      * @return self
      */
-    public function setCallbackEdit(\Closure $callback): self
+    public function setCallbackEdit(callable $callback): self
     {
         $this->set['callback']['edit'] = $callback;
         return $this;
@@ -966,17 +981,17 @@ class MpfField
      */
     public function getCallbackEdit($value, array &$row)
     {
-        return isset($this->set['callback']['edit']) ? $this->set['callback']['edit']($value, $row) : false;
+        return isset($this->set['callback']['edit']) ? call_user_func($this->set['callback']['edit'], $value, $row) : false;
     }
 
     /**
      * 设置导出Excel回调函数
      *
-     * @param \Closure $callback
+     * @param callable $callback
      *            传递的参数为(该字段的值,该条记录结果集,该记录在结果集中的位置)
      * @return self
      */
-    public function setCallbackExcel(\Closure $callback): self
+    public function setCallbackExcel(callable $callback): self
     {
         $this->set['callback']['excel'] = $callback;
         return $this;
@@ -993,7 +1008,7 @@ class MpfField
      */
     public function getCallbackExcel($value, array &$row)
     {
-        return isset($this->set['callback']['excel']) ? $this->set['callback']['excel']($value, $row) : false;
+        return isset($this->set['callback']['excel']) ? call_user_func($this->set['callback']['excel'], $value, $row) : false;
     }
 
     /**
@@ -1031,7 +1046,7 @@ class MpfField
     public function getOptionValue($key)
     {
         if ($this->getOptionSeparator()) {
-            $keys = explode($this->getOptionSeparator(), $value);
+            $keys = explode($this->getOptionSeparator(), $key);
             $return = [];
             foreach ($keys as $key) {
                 $return[] = $this->set['option'][$key] ?? $key;
@@ -1127,7 +1142,7 @@ class MpfField
     }
 
     /**
-     * 设置为主键
+     * 设置为主键，默认编辑只读
      *
      * @return self
      */
@@ -1135,6 +1150,7 @@ class MpfField
     {
         $this->set['isPk'] = true;
         $this->setEditReadOnly();
+        $this->setResultWidth(70);
         return $this;
     }
 

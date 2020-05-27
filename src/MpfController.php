@@ -5,6 +5,18 @@ abstract class MpfController
 {
 
     /**
+     * 请求参数名的设置
+     * --query 查询
+     * --row 编辑或添加
+     * --rows 批量编辑
+     * --pkvs 批量选择
+     * --display 显示的字段
+     *
+     * @var array
+     */
+    public static $queryNames = ['query' => 'q', 'row' => 'rcd', 'rows' => 'rows', 'pkvs' => 'ckb', 'display' => 'dp'];
+
+    /**
      * 操作的模型
      *
      * @var MpfModel
@@ -100,32 +112,32 @@ abstract class MpfController
         if ($action && $action != 'export' && ! $this->checkUserOperat()) {
             $this->mpfReturnErr('你没有此模块的操作权限');
         }
-        if ($action && ! isset($this->mpfSets['operats'][$action]) && ! isset($this->mpfSets['recordOperats'][$action]) &&
-             ! isset($this->mpfSets['resultsOperats'][$action]) && ! isset($this->mpfSets['tabOperats'][$action])) {
+        if ($action && $action != 'cache' && ! isset($this->mpfSets['operats'][$action]) &&
+            ! isset($this->mpfSets['recordOperats'][$action]) && ! isset($this->mpfSets['resultsOperats'][$action]) &&
+            ! isset($this->mpfSets['tabOperats'][$action])) {
             $this->mpfReturnErr('没有此功能');
         }
     }
 
+    /**
+     * 首页
+     */
     public function actionIndex()
     {
         $this->check();
 
         $data['title'] = $this->mpfSets['pageTitle'];
 
-        $data['tabs']['result']['title'] = '结果';
         if ($this->mpfSets['pageAutoQuery']) {
-
-            $data['tabs']['result']['data'] = $this->getResult();
+            $data['tabs']['result'] = $this->getResult();
         } else {
-            $data['tabs']['result']['data'] = [];
+            $data['tabs']['result'] = [];
         }
 
-        $data['tabs']['query']['title'] = '查询';
-        $data['tabs']['query']['data'] = $this->mpfModel->getPageQuery();
+        $data['tabs']['query'] = $this->mpfModel->getPageQuery();
 
         if ($this->mpfSets['pageExplain']) {
-            $data['tabs']['explain']['title'] = '说明';
-            $data['tabs']['explain']['data'] = $this->mpfSets['pageExplain'];
+            $data['tabs']['explain'] = $this->mpfSets['pageExplain'];
         }
 
         $haveOperat = $this->checkUserOperat();
@@ -141,19 +153,21 @@ abstract class MpfController
         }
 
         if ($haveOperat && isset($this->mpfSets['tabOperats']['add'])) {
-            $data['tabs']['add']['title'] = '添加';
-            $data['tabs']['add']['data'] = $this->mpfModel->getPageEdit();
+            $data['tabs']['add'] = $this->mpfModel->getPageEdit();
         }
 
-        $this->mpfReturnSuc($data);
+        $this->mpfReturnPage('index', $data);
     }
 
+    /**
+     * 结果页
+     */
     public function actionResult()
     {
         $this->check();
 
         try {
-            $this->mpfReturnSuc($this->getResult());
+            $this->mpfReturnPage('result', $this->getResult());
         } catch (\Exception $e) {
             $this->mpfReturnErr($e->getMessage());
         }
@@ -164,7 +178,7 @@ abstract class MpfController
         $haveOperat = $this->checkUserOperat();
         $pageSize = $this->mpfSets['pageSize'] ? $this->mpfSets['pageSize'] : $this->getUserPageSize();
 
-        $data = $this->mpfModel->getPageResult($_POST + $_GET, $pageSize);
+        $data = $this->mpfModel->getPageResult($_POST['q'] ?? [], $pageSize);
 
         if ($haveOperat && $data['results']) {
             if ($this->mpfSets['needCheckbox'] || $this->mpfSets['recordOperats']) {
@@ -177,61 +191,83 @@ abstract class MpfController
                 foreach ($data['results'] as $i => $result) {
                     if ($this->mpfSets['needCheckbox']) {
                         $data['results'][$i] = [
-                            'choose' => ['html' => 'input', 'type' => 'checkbox', 'name' => "ckb[$i]",
-                                'id' => "ckb$i", 'value' => "{$result['pk']}"]] + $result;
+                            'choose' => ['html' => 'input', 'type' => 'checkbox', 'name' => "ckb[$i]", 'id' => "ckb$i",
+                                'value' => "{$result['pk']}", 'checked' => false]] + $result;
                     }
                     if ($this->mpfSets['recordOperats']) {
                         foreach ($this->mpfSets['recordOperats'] as $action => $text) {
-                            $data['results'][$i]['operat'][] = ['html' => 'a', 'text' => $text,
+                            $data['results'][$i]['operat'][$action] = ['html' => 'a', 'text' => $text,
                                 'link' => "?act={$action}&pk={$result['pk']}"];
                         }
                     }
                 }
             }
-            if ($this->mpfSets['needCheckbox']) {
-                $data['operats'][] = ['html' => 'input', 'type' => 'checkbox', 'text' => '全选', 'join' => 'ckb'];
-            }
             foreach ($this->mpfSets['resultsOperats'] as $action => $text) {
                 if (is_array($text)) { // updates
                     foreach ($text as $i => $update) {
-                        $data['operats'][] = ['html' => 'input', 'type' => 'submit', 'text' => $$update['text'],
-                            'action' => "?act={$action}&upid={$i}"];
+                        $data['operats'][] = ['html' => 'input', 'type' => 'submit', 'text' => $update['text'],
+                            'action' => "$action&upid={$i}"];
                     }
+                } else {
+                    $data['operats'][] = ['html' => 'input', 'type' => 'submit', 'text' => $text, 'action' => "$action"];
                 }
-                $data['operats'][] = ['html' => 'input', 'type' => 'submit', 'text' => $text,
-                    'action' => "?act={$action}"];
+            }
+            if ($this->mpfModel->getMpfNeedCache()) {
+                $data['operats'][] = ['html' => 'input', 'type' => 'submit', 'text' => '更新缓存', 'action' => "cache"];
             }
         }
         if ($data['results'] && $this->mpfSets['operats']) {
-            $data['operats'][] = ['html' => 'input', 'type' => 'button',
-                'text' => $this->mpfSets['operats']['export'], 'action' => '?act=export'];
+            $data['operats'][] = ['html' => 'input', 'type' => 'submit', 'text' => $this->mpfSets['operats']['export'],
+                'action' => 'export'];
         }
         return $data;
     }
 
+    /**
+     * 编辑
+     */
     public function actionEdit()
     {
         $this->check('edit');
 
-        if (! isset($_GET['pk']) || ! $_GET['pk']) {
+        if (! isset($_POST['pk']) || ! $_POST['pk']) {
             $this->mpfReturnErr('缺少请求参数或参数值为空');
         }
         try {
-            $data['tabs']['edit']['title'] = '编辑';
-            $data['tabs']['edit']['data'] = $this->mpfModel->getPageEdit($_GET['pk']);
-            $this->mpfReturnSuc($data);
+            $this->mpfReturnPage('edit', $this->mpfModel->getPageEdit($_POST['pk'], false));
         } catch (\Exception $e) {
             $this->mpfReturnErr($e->getMessage());
         }
     }
 
+    /**
+     * 复制
+     */
+    public function actionCopy()
+    {
+        $this->check('add');
+
+        if (! isset($_POST['pk']) || ! $_POST['pk']) {
+            $this->mpfReturnErr('缺少请求参数或参数值为空');
+        }
+        try {
+            $this->mpfReturnPage('add', $this->mpfModel->getPageEdit($_POST['pk']));
+        } catch (\Exception $e) {
+            $this->mpfReturnErr($e->getMessage());
+        }
+    }
+
+    /**
+     * 添加或编辑
+     */
     public function actionSave()
     {
         try {
-            if (isset($_POST['pk'])) {
+            if (isset($_POST[self::$queryNames['row']]['pk'])) {
                 $this->check('edit');
 
-                $data = $this->mpfModel->mpfUpdate($_POST['pk'], $_POST['rcd']);
+                $data = $this->mpfModel->mpfUpdate($_POST[self::$queryNames['row']]['pk'],
+                    $_POST[self::$queryNames['row']]);
 
                 if ($data === true) {
                     $data = ['更新了文件'];
@@ -242,12 +278,14 @@ abstract class MpfController
             } else {
                 $this->check('add');
 
-                $data = $this->mpfModel->mpfCreate($_POST['rcd']);
+                $state = $_POST[self::$queryNames['row']]['state'] ?? 0;
+
+                $data = $this->mpfModel->mpfCreate($_POST[self::$queryNames['row']]);
 
                 $this->addOperatLog($data);
 
-                if ($_POST['state']) {
-                    $this->mpfReturnSuc([], '保存成功');
+                if ($state) {
+                    $this->mpfReturnSuc('保存成功');
                 } else {
                     $this->mpfReturnFlush('保存成功');
                 }
@@ -257,47 +295,61 @@ abstract class MpfController
         }
     }
 
+    /**
+     * 批量保存
+     */
     public function actionSaves()
     {
         $this->check('saves');
 
-        $pkvs = $_POST['ckb'];
-        $recodes = $_POST['edit'];
-        if (! $pkvs || ! $recodes) {
+        $pkvs = $_POST[self::$queryNames['pkvs']];
+        $records = $_POST[self::$queryNames['rows']];
+        if (! $pkvs || ! $records) {
             $this->mpfReturnErr('没有选择要保存的数据');
         }
         try {
             $data = $this->mpfModel->mpfSaves($pkvs, $records);
 
             $this->addOperatLog($data);
+
+            $this->mpfReturnFlush("保存成功，共更新" . count($data) . '条记录');
         } catch (\Exception $e) {
             $this->mpfReturnErr($e->getMessage());
         }
     }
 
+    /**
+     * 批量更新
+     */
     public function actionUpdates()
     {
         $this->check('updates');
 
-        $pkvs = $_POST['ckb'];
+        $pkvs = $_POST[self::$queryNames['pkvs']];
         $upid = $_GET['upid'];
         if (! $pkvs) {
-            $this->mpfReturnErr('没有选择要' . $this->mpfSets['resultsOperats'][$upid]['text'] . '的数据');
+            $this->mpfReturnErr("没有选择要设置{$this->mpfSets['resultsOperats']['updates'][$upid]['text']}的数据");
         }
         try {
-            $data = $this->mpfModel->mpfUpdates($pkvs, $this->mpfSets['resultsOperats'][$upid]['update']);
+            $data = $this->mpfModel->mpfUpdates($pkvs, $this->mpfSets['resultsOperats']['updates'][$upid]['update']);
 
             $this->addOperatLog($data);
+
+            $this->mpfReturnFlush(
+                "设置{$this->mpfSets['resultsOperats']['updates'][$upid]['text']}成功，共设置" . count($data['pks']) . '条记录');
         } catch (\Exception $e) {
             $this->mpfReturnErr($e->getMessage());
         }
     }
 
+    /**
+     * 批量删除
+     */
     public function actionDeletes()
     {
         $this->check('deletes');
 
-        $pkvs = $_POST['ckb'];
+        $pkvs = $_POST[self::$queryNames['pkvs']];
         if (! $pkvs) {
             $this->mpfReturnErr('没有选择要删除的数据');
         }
@@ -305,22 +357,45 @@ abstract class MpfController
             $data = $this->mpfModel->mpfDeletes($pkvs);
 
             $this->addOperatLog($data);
+
+            $this->mpfReturnFlush('删除成功，共删除' . count($data) . '条记录');
         } catch (\Exception $e) {
             $this->mpfReturnErr($e->getMessage());
         }
     }
 
+    /**
+     * 缓存
+     */
+    public function actionCache()
+    {
+        $this->check('cache');
+
+        $this->mpfModel->mpfCache();
+
+        $data = [];
+        $this->addOperatLog($data);
+
+        $this->mpfReturnFlush('缓存成功');
+    }
+
+    /**
+     * 导出，注意这里用的GET，如果是POST需要修改
+     */
     public function actionExport()
     {
         $this->check('export');
 
         if (class_exists('PhpOffice\\PhpSpreadsheet\\Spreadsheet')) {
-            $this->mpfModel->mpfExportExcel($_POST, $this->mpfSets['pageTitle']);
+            $this->mpfModel->mpfExportExcel($_GET['q'], $this->mpfSets['pageTitle']);
         } else {
-            $this->mpfModel->mpfExportCsv($_POST, $this->mpfSets['pageTitle']);
+            $this->mpfModel->mpfExportCsv($_GET['q'], $this->mpfSets['pageTitle']);
         }
     }
 
+    /**
+     * 导入
+     */
     public function actionImport()
     {
         $this->check('import');
@@ -342,30 +417,47 @@ abstract class MpfController
         $data = $return['data'];
         $this->addOperatLog($data);
 
-        $this->mpfReturnSuc([], "成功{$return['suc']},失败{$return['err']}," . implode('\n', $return['msg']));
+        $this->mpfReturnFlush("成功{$return['suc']},失败{$return['err']}," . implode('\n', $return['msg']));
     }
 
-    protected function mpfReturnSuc(array $data, string $msg = ''): void
+    /**
+     * 返回页面需要的数据
+     *
+     * @param string $pageName
+     * @param array $data
+     * @param string $msg
+     */
+    protected function mpfReturnPage(string $target, array $data): void
     {
-        $this->mpfReturn(1, $data, $msg);
+        self::mpfReturn(1, $data, $target);
+    }
+
+    protected function mpfReturnSuc(string $msg): void
+    {
+        self::mpfReturn(5, [], $msg);
     }
 
     protected function mpfReturnErr(string $msg): void
     {
-        $this->mpfReturn(0, [], $msg);
+        self::mpfReturn(0, [], $msg);
     }
 
     protected function mpfReturnJump(string $url): void
     {
-        $this->mpfReturn(2, [], $url);
+        self::mpfReturn(2, [], $url);
     }
 
     protected function mpfReturnFlush(string $msg): void
     {
-        $this->mpfReturn(3, [], $msg);
+        self::mpfReturn(3, [], $msg);
     }
 
-    protected function mpfReturn(int $code, array $data, string $msg): void
+    public static function mpfReturnDebug(array $data): void
+    {
+        self::mpfReturn(4, $data, '');
+    }
+
+    public static function mpfReturn(int $code, array $data, string $msg): void
     {
         header('Content-Type:application/json');
         echo json_encode(compact('code', 'data', 'msg'), JSON_UNESCAPED_UNICODE);
@@ -395,9 +487,7 @@ abstract class MpfController
     protected function setMpfModel(string $mpfModelName): self
     {
         $name = str_replace('_', '\\', $mpfModelName);
-        $this->mpfModel = new $name(
-            ['isMpf' => true, 'username' => 'manage', 'password' => '123456',
-                'dsn' => 'mysql:host=127.0.0.1;port=3306;dbname=laraveltest']);
+        $this->mpfModel = new $name(['isMpf' => true]);
         return $this;
     }
 
@@ -410,6 +500,7 @@ abstract class MpfController
     protected function setOperatAdd(string $text = '添加'): self
     {
         $this->mpfSets['tabOperats']['add'] = $text;
+        $this->mpfSets['recordOperats']['copy'] = '复制';
         return $this;
     }
 
@@ -422,7 +513,6 @@ abstract class MpfController
     protected function setOperatEdit(string $text = '编辑'): self
     {
         $this->mpfSets['recordOperats']['edit'] = $text;
-        $this->mpfSets['recordOperats']['copy'] = '复制';
         return $this;
     }
 
