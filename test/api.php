@@ -1,12 +1,8 @@
 <?php
 spl_autoload_register('autoload');
 
-$ctr = 'mpf\\controller\\' . ($_GET['ctr'] ?? 'Dictionary');
+$ctr = 'mpf\\controller\\' . str_replace('mpf_', '', $_GET['ctr'] ?? 'mpf_Dictionary');
 $act = 'action' . ($_GET['act'] ?? 'index');
-
-// header('Access-Control-Allow-Origin:*');
-// header('Access-Control-Allow-Credentials:true');
-// header('Access-Control-Allow-Methods:GET,POST,PUT');
 
 (new $ctr())->$act();
 

@@ -46,7 +46,7 @@ class Dictionary extends MpfModel
 
     public function getNameList(): array
     {
-        $rows = $this->pdoSelect("SELECT DISTINCT name FROM {$this->mpfTable} ORDER BY `name`");
+        $rows = $this->pdoSelect("SELECT DISTINCT name FROM mpf_dictionaries ORDER BY `name`");
         $return = [];
         foreach ($rows as $row) {
             $return[$row['name']] = $row['name'];

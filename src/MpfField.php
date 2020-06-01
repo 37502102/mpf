@@ -184,9 +184,9 @@ class MpfField
             $titles = explode($this->getOptionSeparator(), $value);
             $values = $this->getOptionValue($value);
             $colors = [];
-            if ($this->getTagColor()) { // 颜色
+            if ($this->getResultColor()) { // 颜色
                 foreach ($titles as $k) {
-                    $colors[] = $this->getTagColor($k);
+                    $colors[] = $this->getResultColor($k);
                 }
             }
             foreach ($titles as $k => $v) {
@@ -197,8 +197,8 @@ class MpfField
             }
         } else { // 单选
             $return = ['html' => 'span', 'title' => $value, 'text' => $this->getOptionValue($value)];
-            if ($this->getTagColor()) {
-                $return['color'] = $this->getTagColor($value);
+            if ($this->getResultColor()) {
+                $return['color'] = $this->getResultColor($value);
             }
         }
         return $return;
@@ -224,10 +224,10 @@ class MpfField
      * @param mixed $value
      * @return array 未设置返回空数组
      */
-    public function getResultMore($value): array
+    public function getResultMore($value)
     {
         if (! isset($this->set['resultMore'])) {
-            return [];
+            return false;
         }
         if (is_int($this->set['resultMore'])) {
             if (mb_strlen($value, 'utf-8') > $this->set['resultMore']) {
@@ -277,7 +277,7 @@ class MpfField
      */
     public function getResult($value, array &$row, int $i, string $uploadUrl)
     {
-        if ($ary = $this->getCallbackResult($value, $row)) { // 自定义函数
+        if ($ary = $this->getResultCallback($value, $row)) { // 自定义函数
             return $ary;
         } elseif ($value && $ary = $this->getResultUpload($uploadUrl, $value)) { // 上传文件
             return $ary;
@@ -295,7 +295,7 @@ class MpfField
 
     public function getExcel($value, array &$row)
     {
-        if ($v = $this->getCallbackExcel($value, $row)) {
+        if ($v = $this->getExcelCallback($value, $row)) {
             return $v;
         } elseif ($this->getOption()) {
             $v = $this->getOptionValue($value);
@@ -327,7 +327,7 @@ class MpfField
     }
 
     /**
-     * 设置编辑页不显示原值,不设置时默认为否
+     * 设置编辑页不显示原值，不设置时默认为否，提交时如果未填写会过滤掉该项
      *
      * @param bool $noValue
      * @return self
@@ -559,15 +559,21 @@ class MpfField
         $return = ['title' => $this->getEditTitle()];
         $value = $row ? $row[$this->getFieldAlias(true)] : '';
 
-        if ($this->getEditNoValue() || $this->getEditReadOnly()) { // 不显示值或只读
-            $return['data'] = [
-                'text' => $this->getEditNoValue() ? '' : ($this->getOption() ? $this->getOptionValue($value) : $value)];
+        if ($this->getEditNoValue()) { // 不显示值
+            $value = '';
+        }
+
+        if ($this->getEditReadOnly()) { // 只读
+            $return['data'] = ['text' => $this->getOption() ? $this->getOptionValue($value) : $value];
             return $return;
         }
 
         $return['data'] = ['name' => $this->getEditName(), 'key' => $this->getKey(),
             'require' => $this->getEditRequire()];
-        if ($option = $this->getOption()) { // 枚举
+
+        if ($ary = $this->getEditCallback($value, $row)) { // 回调
+            $return['data'] += $ary;
+        } elseif ($option = $this->getOption()) { // 枚举
             $return['data']['html'] = $this->set['edit'] ?? 'select';
             if ($str = $this->getOptionSeparator()) { // 多选
                 $return['data']['value'] = explode($str, $value);
@@ -582,8 +588,6 @@ class MpfField
             if (isset($this->set['editJoin'])) { // 联动
                 $return['data']['join'] = $this->set['editJoin'];
             }
-        } elseif ($ary = $this->getCallbackEdit($value, $row)) { // 回调
-            $return['data'] += $ary;
         } else {
             $return['data']['value'] = $value;
             $return['data']['html'] = $this->set['edit'] ?? 'input';
@@ -758,9 +762,13 @@ class MpfField
     /**
      * 获取查询页搜索项
      *
+     * @param bool $isDefault
+     *            是否为默认查询，否则为页面请求
+     * @param array $values
+     *            页面请求的值
      * @return array
      */
-    public function getQuery(): array
+    public function getQuery(bool $isDefault = true, array $values = []): array
     {
         if ($this->isStat()) {
             $type = 'stat';
@@ -771,8 +779,28 @@ class MpfField
             return [];
         }
 
-        $min = $this->getQueryDefaultMin();
-        $max = $this->getQueryDefaultMax();
+        if ($isDefault) {
+            $min = $this->getQueryDefaultMin();
+            $max = $this->getQueryDefaultMax();
+        } else {
+            switch ($type) {
+                case 'text':
+                    $min = $values['act'] ?? '';
+                    $max = isset($values['blur']) ? boolval($values['blur']) : false;
+                    break;
+                case 'date':
+                case 'number':
+                case 'stat':
+                    $min = $values['min'] ?? '';
+                    $max = $values['max'] ?? '';
+                    break;
+                case 'selectone':
+                    $min = $values ?: '';
+                    break;
+                default:
+                    $min = $values;
+            }
+        }
 
         $return = ['title' => $this->getText(), 'type' => $type, 'key' => $this->getKey()];
         switch ($type) {
@@ -780,13 +808,10 @@ class MpfField
                 $return['query'] = ['name' => self::getQueryName($this) . "[act]", 'value' => $min];
 
                 if ($this->canQueryBlur()) { // 允许模糊搜索
-                    $return['query2'] = ['name' => self::getQueryName($this) . "[blur]", 'value' => false];
+                    $return['query2'] = ['name' => self::getQueryName($this) . "[blur]", 'value' => boolval($max)];
                 }
                 break;
             case 'date':
-                $return['query'] = ['name' => self::getQueryName($this) . "[min]", 'value' => $min];
-                $return['query2'] = ['name' => self::getQueryName($this) . "[max]", 'value' => $max];
-                break;
             case 'number':
             case 'stat':
                 $return['query'] = ['name' => self::getQueryName($this) . "[min]", 'value' => $min];
@@ -814,16 +839,21 @@ class MpfField
     /**
      * 获取查询页显示项
      *
+     * @param bool $isDefault
+     *            是否为默认查询，否则为页面请求
+     * @param bool $isDisplay
+     *            页面请求的值
      * @return array 如果没有设置返回空数组
      */
-    public function getQueryDisplay(): array
+    public function getQueryDisplay(bool $isDefault = true, bool $isDisplay): array
     {
         if ($this->isStat()) { // 统计项不能选择
             return [];
         }
         return ['html' => 'checkbox',
             'name' => MpfController::$queryNames['query'] . '[' . MpfController::$queryNames['display'] . '][]',
-            'value' => $this->getKey(), 'checked' => $this->getResultDisplay(), 'text' => $this->getText()];
+            'value' => $this->getKey(), 'checked' => $isDefault ? $this->getResultDisplay() : $isDisplay,
+            'text' => $this->getText()];
     }
 
     /**
@@ -937,7 +967,7 @@ class MpfField
      *            传递的参数为(该字段的值,该条记录结果集,该记录在结果集中的位置)
      * @return self
      */
-    public function setCallbackResult(callable $callback): self
+    public function setResultCallback(callable $callback): self
     {
         $this->set['callback']['result'] = $callback;
         return $this;
@@ -952,7 +982,7 @@ class MpfField
      *            整条记录
      * @return mixed 未设置返回false
      */
-    public function getCallbackResult($value, array &$row)
+    public function getResultCallback($value, array &$row)
     {
         return isset($this->set['callback']['result']) ? call_user_func($this->set['callback']['result'], $value, $row) : false;
     }
@@ -964,7 +994,7 @@ class MpfField
      *            传递的参数为(该字段的值,该条记录数组)
      * @return self
      */
-    public function setCallbackEdit(callable $callback): self
+    public function setEditCallback(callable $callback): self
     {
         $this->set['callback']['edit'] = $callback;
         return $this;
@@ -979,7 +1009,7 @@ class MpfField
      *            整条记录
      * @return mixed 未设置返回false
      */
-    public function getCallbackEdit($value, array &$row)
+    public function getEditCallback($value, array &$row)
     {
         return isset($this->set['callback']['edit']) ? call_user_func($this->set['callback']['edit'], $value, $row) : false;
     }
@@ -991,7 +1021,7 @@ class MpfField
      *            传递的参数为(该字段的值,该条记录结果集,该记录在结果集中的位置)
      * @return self
      */
-    public function setCallbackExcel(callable $callback): self
+    public function setExcelCallback(callable $callback): self
     {
         $this->set['callback']['excel'] = $callback;
         return $this;
@@ -1006,7 +1036,7 @@ class MpfField
      *            整条记录
      * @return mixed 未设置返回false
      */
-    public function getCallbackExcel($value, array &$row)
+    public function getExcelCallback($value, array &$row)
     {
         return isset($this->set['callback']['excel']) ? call_user_func($this->set['callback']['excel'], $value, $row) : false;
     }
@@ -1023,6 +1053,7 @@ class MpfField
     {
         $this->set['option'] = $option;
         $this->set['optionSeparator'] = $separator;
+        $this->setResultColor();
         return $this;
     }
 
@@ -1072,9 +1103,9 @@ class MpfField
      * @param bool $color
      * @return self
      */
-    public function setTagColor(): self
+    public function setResultColor(): self
     {
-        $this->set['tagColor'] = true;
+        $this->set['resultColor'] = true;
         return $this;
     }
 
@@ -1085,12 +1116,12 @@ class MpfField
      *            值,为空字符串时为获取是否设置了标签颜色
      * @return bool|string 返回值对应的颜色,未设置返回false
      */
-    public function getTagColor($value = '')
+    public function getResultColor($value = null)
     {
-        if (! isset($this->set['tagColor'])) {
+        if (! isset($this->set['resultColor'])) {
             return false;
-        } elseif ($value === '') {
-            return $this->set['tagColor'];
+        } elseif ($value === null) {
+            return $this->set['resultColor'];
         }
 
         $count = count(self::$tagColors);
@@ -1176,7 +1207,8 @@ class MpfField
     {
         $this->set['isStat'] = true;
         $this->set['sql'] .= ' AS ' . $this->getKey(); // 自动加上key的别名
-        $this->setResultAlign('right');
+        $this->setResultWidth(100);
+
         if ($statAllSql) {
             $this->set['statAllSql'] = $statAllSql;
         }

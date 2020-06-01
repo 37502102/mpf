@@ -36,11 +36,12 @@ trait MpfPdo
      * 创建
      *
      * @param array $row
+     * @param string $table
      * @return int
      */
-    public function pdoCreate(array &$row): int
+    public function pdoCreate(array &$row, string $table = ''): int
     {
-        $sql = "INSERT INTO `{$this->mpfTable}` (`" . implode('`,`', array_keys($row)) . "`) values(:" .
+        $sql = "INSERT INTO `" . ($table ?: $this->mpfTable) . "` (`" . implode('`,`', array_keys($row)) . "`) values(:" .
             implode(',:', array_keys($row)) . ")";
 
         $this->mpfPdoStat = self::$mpfPdo->prepare($sql);
@@ -49,6 +50,8 @@ trait MpfPdo
         }
         if ($this->mpfPdoStat->execute()) {
             return self::$mpfPdo->lastInsertId();
+        } else {
+            throw new \Exception($this->parseError());
         }
         return 0;
     }
@@ -58,11 +61,12 @@ trait MpfPdo
      *
      * @param int $pkv
      * @param array $row
+     * @param string $table
      * @return bool
      */
-    public function pdoUpdate(int $pkv, array &$row): bool
+    public function pdoUpdate(int $pkv, array &$row, string $table = ''): bool
     {
-        $sql = "UPDATE `{$this->mpfTable}` SET ";
+        $sql = "UPDATE `" . ($table ?: $this->mpfTable) . "` SET ";
         foreach ($row as $k => $v) {
             $sql .= "`{$k}` = :{$k},";
         }
@@ -81,11 +85,12 @@ trait MpfPdo
      * 根据主键查询
      *
      * @param int $pkv
+     * @param string $table
      * @return &array 未找到时返回空数组
      */
-    public function &pdoFind(int $pkv): array
+    public function &pdoFind(int $pkv, string $table = ''): array
     {
-        $sql = "SELECT * FROM `{$this->mpfTable}` WHERE `{$this->mpfPk}` = ?";
+        $sql = "SELECT * FROM `" . ($table ?: $this->mpfTable) . "` WHERE `{$this->mpfPk}` = ?";
         $this->mpfPdoStat = self::$mpfPdo->prepare($sql);
         $this->mpfPdoStat->bindValue(1, $pkv);
         $this->mpfPdoStat->execute();
@@ -147,5 +152,11 @@ trait MpfPdo
         while ($row = $this->mpfPdoStat->fetch(\PDO::FETCH_ASSOC)) {
             yield $row;
         }
+    }
+
+    private function parseError()
+    {
+        $error = $this->mpfPdoStat->errorInfo();
+        return str_ireplace(['Duplicate entry'], ['该名称已存在:'], array_pop($error));
     }
 }

@@ -1,6 +1,8 @@
 <?php
 namespace mpf;
 
+use mpf\model\Module;
+
 abstract class MpfController
 {
 
@@ -94,14 +96,18 @@ abstract class MpfController
     /**
      * 记录用户操作日志
      *
+     * @todo
      * @param array $data
      */
     protected function addOperatLog(array &$data): void
     {
-        // @todo
+        $row = ['user_id' => 1, 'module_id' => mt_rand(1, 10), 'action' => $_GET['act'], 'create_date' => date('Y-m-d'),
+            'ip' => $_SERVER['REMOTE_ADDR'], 'data' => json_encode($data, JSON_UNESCAPED_UNICODE),
+            'create_time' => date('H:i:s')];
+        $this->mpfModel->pdoCreate($row, 'mpf_uselogs');
     }
 
-    private function check(string $action = '')
+    protected function check(string $action = '')
     {
         if (! $this->checkLogin()) {
             $this->mpfReturnJump('/login');
@@ -128,13 +134,17 @@ abstract class MpfController
 
         $data['title'] = $this->mpfSets['pageTitle'];
 
+        $data['menu'] = Module::getMpfCache()[1]['menu']; // 取后台菜单
+
         if ($this->mpfSets['pageAutoQuery']) {
             $data['tabs']['result'] = $this->getResult();
         } else {
             $data['tabs']['result'] = [];
         }
 
-        $data['tabs']['query'] = $this->mpfModel->getPageQuery();
+        $data['tabs']['query'] = $this->mpfModel->getPageQuery($_POST[self::$queryNames['query']] ?? []);
+
+        $msg = ! isset($_POST[self::$queryNames['query']]) && $this->mpfModel->hasDefaultQuery() ? '请注意本模块设置了默认搜索条件' : '';
 
         if ($this->mpfSets['pageExplain']) {
             $data['tabs']['explain'] = $this->mpfSets['pageExplain'];
@@ -156,7 +166,7 @@ abstract class MpfController
             $data['tabs']['add'] = $this->mpfModel->getPageEdit();
         }
 
-        $this->mpfReturnPage('index', $data);
+        $this->mpfReturnPage('index', $data, $msg);
     }
 
     /**
@@ -178,7 +188,8 @@ abstract class MpfController
         $haveOperat = $this->checkUserOperat();
         $pageSize = $this->mpfSets['pageSize'] ? $this->mpfSets['pageSize'] : $this->getUserPageSize();
 
-        $data = $this->mpfModel->getPageResult($_POST['q'] ?? [], $pageSize);
+        $data = $this->mpfModel->getPageResult(
+            $_POST[self::$queryNames['query']] ?? ($_GET[self::$queryNames['query']] ?? []), $pageSize);
 
         if ($haveOperat && $data['results']) {
             if ($this->mpfSets['needCheckbox'] || $this->mpfSets['recordOperats']) {
@@ -427,9 +438,9 @@ abstract class MpfController
      * @param array $data
      * @param string $msg
      */
-    protected function mpfReturnPage(string $target, array $data): void
+    protected function mpfReturnPage(string $target, array $data, string $msg = ''): void
     {
-        self::mpfReturn(1, $data, $target);
+        self::mpfReturn(1, $data, $msg, $target);
     }
 
     protected function mpfReturnSuc(string $msg): void
@@ -457,10 +468,10 @@ abstract class MpfController
         self::mpfReturn(4, $data, '');
     }
 
-    public static function mpfReturn(int $code, array $data, string $msg): void
+    public static function mpfReturn(int $code, array $data, string $msg, string $target = ''): void
     {
         header('Content-Type:application/json');
-        echo json_encode(compact('code', 'data', 'msg'), JSON_UNESCAPED_UNICODE);
+        echo json_encode(compact('code', 'data', 'msg', 'target'), JSON_UNESCAPED_UNICODE);
         exit();
     }
 
@@ -473,7 +484,7 @@ abstract class MpfController
     protected function setMpfNotTable(string $mpfModelName): self
     {
         $name = str_replace('_', '\\', $mpfModelName);
-        $this->mpfModel = new $name(['isMpf' => true, 'notTable' => true]);
+        $this->mpfModel = new $name(true, true);
         return $this;
     }
 
@@ -487,7 +498,7 @@ abstract class MpfController
     protected function setMpfModel(string $mpfModelName): self
     {
         $name = str_replace('_', '\\', $mpfModelName);
-        $this->mpfModel = new $name(['isMpf' => true]);
+        $this->mpfModel = new $name(true);
         return $this;
     }
 

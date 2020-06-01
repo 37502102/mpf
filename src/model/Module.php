@@ -20,10 +20,8 @@ class Module extends MpfModel
             ->setMpfField(MpfField::new('f2', '名称', 'name')->setResultInput()
             ->setEditRequire()
             ->setQueryText())
-            ->setMpfField(
-            MpfField::new('f3', '所属上线', 'fatherid')->setOption($this->getFatherList())
-                ->setQuerySelect()
-                ->setTagColor())
+            ->setMpfField(MpfField::new('f3', '所属上级', 'fatherid')->setOption($this->getFatherList())
+            ->setQuerySelect())
             ->setMpfField(
             MpfField::new('f4', '地址', 'url')->setResultInput()
                 ->setQueryText()
@@ -39,26 +37,56 @@ class Module extends MpfModel
             ->setMpfField(
             MpfField::new('f6', '状态', 'status')->setOption(Dictionary::getDics('模块状态'))
                 ->setResultWidth(80)
-                ->setTagColor()
-                ->setQuerySelect())
+                ->setQuerySelect()
+                ->setEditNotice('隐藏状态的模块不会显示在菜单上'))
+            ->setMpfField(
+            MpfField::new('f10', '图标', 'icon')->setEditNotice('一级模块设置图标，便于菜单收缩时只显示图标，使用图标的class名')
+                ->setResultWidth(60)
+                ->setResultCallback(function ($v) {
+                return $v ? ['html' => 'icon', 'class' => $v] : '';
+            }))
             ->setMpfField(
             MpfField::new('f9', '平台', 'platform')->setOption(Dictionary::getDics('模块平台'))
                 ->setResultWidth(80)
-                ->setTagColor()
                 ->setQuerySelect())
-            ->setMpfField(MpfField::new('f8', '说明', 'bewrite'));
+            ->setMpfField(MpfField::new('f8', '说明', 'bewrite')->setResultDisplay());
         $this->setMpfOrder('platform', 'a')
             ->setMpfOrder('fatherid', 'a')
             ->setMpfOrder('mod_order', 'a');
         $this->setMpfNeedCache();
     }
 
-    public function getFatherList()
+    /**
+     * 获取目录列表
+     *
+     * @return array
+     */
+    public function getFatherList(): array
     {
         $return = ['无'];
-        $rows = $this->pdoSelect("SELECT id,name,fatherid FROM {$this->mpfTable} WHERE url='' ORDER BY fatherid");
+        $rows = $this->pdoSelect("SELECT id,name,fatherid FROM mpf_modules WHERE url='' ORDER BY fatherid");
         foreach ($rows as $row) {
             $return[$row['id']] = $row['fatherid'] ? $return[$row['fatherid']] . '->' . $row['name'] : $row['name'];
+        }
+        return $return;
+    }
+
+    /**
+     * 获取模块列表
+     *
+     * @param number $platform
+     *            平台编号
+     * @return array
+     */
+    public static function getList($platform = 1): array
+    {
+        $return = ['' => '无', 'all' => '全部'];
+        $rows = self::getMpfCache(true)[1];
+        foreach ($rows as $k => $v) {
+            if ($k == 'menu') {
+                continue;
+            }
+            $return[$k] = $v['name'];
         }
         return $return;
     }
@@ -66,11 +94,13 @@ class Module extends MpfModel
     protected function &mpfCacheBefore(): array
     {
         $return = [];
-        $rows = $this->pdoSelect("SELECT * FROM {$this->mpfTable} WHERE status>0 ORDER BY fatherid,mod_order");
+        $rows = $this->pdoSelect("SELECT * FROM {$this->mpfTable} WHERE status>0 ORDER BY platform,fatherid,mod_order");
         foreach ($rows as $row) {
-            $return[$row['id']] = $row;
+            $return[$row['platform']][$row['id']] = $row;
         }
-        $return['menu'] = $this->addMenu($return, 0);
+        foreach ($return as $platform => $rows) { // 添加菜单
+            $return[$platform]['menu'] = $this->addMenu($rows, 0);
+        }
 
         return $return;
     }
@@ -87,12 +117,14 @@ class Module extends MpfModel
     private function &addMenu(&$rows, $fatherid)
     {
         $return = [];
+        $i = 0;
         foreach ($rows as $id => $row) {
             if ($row['fatherid'] == $fatherid && $row['status'] == 1) {
-                $return[$id] = $row;
+                $return[$i] = $row;
                 if (! $row['url']) { // 没有地址属于目录
-                    $return[$id]['submenu'] = $this->addMenu($rows, $id);
+                    $return[$i]['submenu'] = $this->addMenu($rows, $id);
                 }
+                $i ++;
             }
         }
         return $return;

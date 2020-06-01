@@ -74,23 +74,14 @@ abstract class MpfModel
     /**
      * 构造函数
      *
+     * @param bool $isMpf
+     *            使用mpf模式
+     * @param bool $notTable
+     *            使用非表模式
      * @param array $attributes
-     *            由MpfController调用时会加上'mpf'=>true则会调用mpfinit()进行初始化
      */
-    public function __construct($attributes = [])
+    public function __construct(bool $isMpf = false, bool $notTable = false, $attributes = [])
     {
-        $isMpf = false;
-        if (isset($attributes['isMpf'])) {
-            $isMpf = true;
-            unset($attributes['isMpf']);
-        }
-
-        $notTable = false;
-        if (isset($attributes['notTable'])) {
-            $notTable = true;
-            unset($attributes['notTable']);
-        }
-
         foreach (self::$condTypes as $type) {
             $this->mpfSets['conds'][$type] = [];
         }
@@ -467,12 +458,7 @@ abstract class MpfModel
      */
     public static function valueIsEmpty($v): bool
     {
-        if (is_array($v)) {
-            if (! $v) {
-                return true;
-            }
-        }
-        if ($v === null || strlen($v) == 0) {
+        if ($v === null || $v === '' || $v === []) {
             return true;
         }
         return false;
@@ -527,7 +513,10 @@ abstract class MpfModel
                 }
             } elseif (! isset($record[$key])) {
                 continue;
+            } elseif ($fieldSet->getEditNoValue() && self::valueIsEmpty($record[$key])) {
+                continue;
             }
+
             if ($fieldSet->getOptionSeparator()) {
                 if (is_array($record[$key])) {
                     $record[$key] = implode($fieldSet->getOptionSeparator(), $record[$key]);
@@ -623,7 +612,7 @@ abstract class MpfModel
      *
      * @return array
      */
-    private function getDefaultQuery()
+    public function getDefaultQuery()
     {
         $return = [];
         /**
@@ -634,11 +623,23 @@ abstract class MpfModel
             if ($ary = $fieldSet->getQueryDefault()) {
                 $return = array_merge_recursive($return, $ary);
             }
-            if ($fieldSet->getQueryDisplay()) {
+            if ($fieldSet->getResultDisplay() && ! $fieldSet->isStat()) {
                 $return[MpfController::$queryNames['display']][] = $key;
             }
         }
         return $return;
+    }
+
+    /**
+     * 获取请求参数的字符串
+     *
+     * @return string
+     */
+    public function getQueryStr()
+    {
+        $return = $this->getDefaultQuery();
+        $return['subv'] = 1;
+        return urldecode(http_build_query([MpfController::$queryNames['query'] => $return]));
     }
 
     /**
@@ -671,6 +672,10 @@ abstract class MpfModel
             $fOrderStr = $orderKey . '-' . (strtolower($order) == 'd' ? 'a' : 'd'); // 相反排序
         }
 
+        /**
+         *
+         * @var MpfField $fieldSet
+         */
         $stats = $this->mpfSets['stats'];
         foreach ($req as $key => $value) {
             if ($key == MpfController::$queryNames['display']) {
@@ -776,8 +781,8 @@ abstract class MpfModel
             }
         }
         if ($stats) { // 统计字段都显示
-            foreach ($stats as $k => $v) {
-                $selects[] = $v->getSql();
+            foreach ($stats as $k => $fieldSet) {
+                $selects[] = $fieldSet->getSql();
                 $this->mpfSets['fieldSelects'][] = $k;
                 $this->mpfSets['fieldOrders'][$k] = $orderKey == $k ? $fOrderStr : $k . "-d";
                 if ($join = $fieldSet->getJoinKey()) { // 有关联SQL
@@ -845,7 +850,7 @@ abstract class MpfModel
         $endTime = microtime(true);
         // var_dump($sql2, $bindings, $endTime - $startTime);
 
-        $return = ['titles' => $this->getMpfResultTitles(), 'results' => [], 'pages' => [], 'stats' => []];
+        $return = ['titles' => $this->getMpfResultTitles(), 'results' => [], 'pages' => []];
 
         if ($total) { // 分页
             $pages = ceil($total / $pageSize);
@@ -887,7 +892,7 @@ abstract class MpfModel
      *
      * @return &array
      */
-    public function &getPageQuery(): array
+    public function &getPageQuery(array $values = []): array
     {
         $return = [];
         /**
@@ -899,29 +904,16 @@ abstract class MpfModel
                 continue;
             }
             foreach ($fields as $fieldSet) {
-                $return['data'][] = $query = $fieldSet->getQuery();
-
-                // Vue绑定用的数据
-                // if (isset($query['query']['sub'])) {
-                // $return['vue'][$fieldSet->getKey()][$query['query']['sub']] = $query['query']['value'];
-                // } else {
-                // $return['vue'][$fieldSet->getKey()] = $query['query']['value'];
-                // }
-                // if (isset($query['query2'])) {
-                // $return['vue'][$fieldSet->getKey()][$query['query2']['sub']] = $query['query2']['value'];
-                // }
+                $return['data'][] = $query = $fieldSet->getQuery(! isset($values['subv']),
+                    $values[$fieldSet->getKey()] ?? []);
             }
-            // $return['vue']['subv'] = 1;
-            // $return['vue']['page'] = 1;
-            // $return['vue']['ord'] = '';
         }
         // 显示或归类
         foreach ($this->mpfSets['fields'] as $fieldSet) {
-            if ($data = $fieldSet->getQueryDisplay()) {
+            if ($data = $fieldSet->getQueryDisplay(! isset($values['subv']),
+                isset($values[MpfController::$queryNames['display']]) &&
+                in_array($fieldSet->getKey(), $values[MpfController::$queryNames['display']]))) {
                 $return['display'][] = $data;
-                // if ($data['checked']) {
-                // $return['vue'][MpfController::$queryNames['display']][] = $data['value'];
-                // }
             }
         }
         $return['hidden'] = [
@@ -933,6 +925,26 @@ abstract class MpfModel
                 'value' => '']];
 
         return $return;
+    }
+
+    /**
+     * 是否有设置默认查询条件
+     *
+     * @return boolean
+     */
+    public function hasDefaultQuery()
+    {
+        foreach ($this->mpfSets['conds'] as $type => $fields) {
+            if (! $fields) {
+                continue;
+            }
+            foreach ($fields as $fieldSet) {
+                if ($fieldSet->getQueryDefaultMin() || $fieldSet->getQueryDefaultMax()) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /**
@@ -1573,6 +1585,9 @@ abstract class MpfModel
             if ($field == 'pk') {
                 continue;
             }
+            if ($v === null) {
+                $row[$field] = $v = '';
+            }
             $key = $this->getMpfFieldKey($field);
             $fieldSet = $this->getMpfField($key);
 
@@ -1604,6 +1619,7 @@ abstract class MpfModel
                 $titles[$field]['key'] = $temp[0];
                 $titles[$field]['ord'] = $temp[1];
                 $titles[$field]['width'] = $fieldSet->getResultWidth();
+                $titles[$field]['isStat'] = $fieldSet->isStat();
             } else { // excel
                 $titles[$field] = $fieldSet->getText();
             }
