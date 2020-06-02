@@ -1398,6 +1398,9 @@ abstract class MpfModel
         $havePk = false;
         $suc = $err = 0;
         foreach ($ary as $i => $v) {
+            if (! $v) {
+                continue;
+            }
             $temp = array_map('trim', explode(',', $v));
             if ($i == 0) { // 标题
                 if (! $this->parsImportTitle($temp, $title, $msg, $havePk)) {
@@ -1428,6 +1431,9 @@ abstract class MpfModel
         $havePk = false;
         $suc = $err = 0;
         foreach ($ary as $i => $v) {
+            if (! $v) {
+                continue;
+            }
             $temp = array_map('trim', $v);
             if ($i == 0) { // 标题
                 if (! $this->parsImportTitle($temp, $title, $msg, $havePk)) {

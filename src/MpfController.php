@@ -153,13 +153,8 @@ abstract class MpfController
         $haveOperat = $this->checkUserOperat();
 
         if ($haveOperat && isset($this->mpfSets['tabOperats']['import'])) {
-            $data['tabs']['import']['title'] = '导入';
-            if ($this->mpfSets['tabOperats']['import']) {
-                $data['tabs']['import']['data'] = ['html' => 'a', 'text' => '下载模版',
-                    'link' => $this->mpfSets['tabOperats']['import']];
-            } else {
-                $data['tabs']['import']['data'] = [];
-            }
+            $data['tabs']['import'] = ['html' => 'input', 'type' => 'file', 'name' => 'import',
+                'template' => $this->mpfSets['tabOperats']['import']];
         }
 
         if ($haveOperat && isset($this->mpfSets['tabOperats']['add'])) {
@@ -416,7 +411,7 @@ abstract class MpfController
         }
 
         $info = pathinfo($_FILES['import']['name']);
-        $ext = strtolower($info['PATHINFO_EXTENSION ']);
+        $ext = strtolower($info['extension']);
 
         if ($ext == 'csv') {
             $return = $this->mpfModel->mpfImportCsv($_FILES['import']['tmp_name']);
@@ -428,7 +423,8 @@ abstract class MpfController
         $data = $return['data'];
         $this->addOperatLog($data);
 
-        $this->mpfReturnFlush("成功{$return['suc']},失败{$return['err']}," . implode('\n', $return['msg']));
+        $this->mpfReturnFlush(
+            "成功导入{$return['suc']}条数据，失败{$return['err']}条" . ($return['msg'] ? '，' . implode("\n", $return['msg']) : ''));
     }
 
     /**
